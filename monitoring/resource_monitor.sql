@@ -1,0 +1,16 @@
+-- Resource Monitor: LEARNING_MONITOR
+-- Purpose: Account-level credit guard with 400 credit monthly budget
+-- Notifications at 30%, 50%; Suspend at 90%; Immediate suspend at 100%
+
+CREATE OR REPLACE RESOURCE MONITOR LEARNING_MONITOR
+    WITH CREDIT_QUOTA = 400
+    FREQUENCY = MONTHLY
+    START_TIMESTAMP = IMMEDIATELY
+    TRIGGERS
+        ON 30 PERCENT DO NOTIFY
+        ON 50 PERCENT DO NOTIFY
+        ON 90 PERCENT DO SUSPEND
+        ON 100 PERCENT DO SUSPEND_IMMEDIATE;
+
+-- Attach to account
+ALTER ACCOUNT SET RESOURCE_MONITOR = LEARNING_MONITOR;
