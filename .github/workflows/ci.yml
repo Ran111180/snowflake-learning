@@ -11,12 +11,13 @@ jobs:
   test-in-dev:
     runs-on: ubuntu-latest
     env:
-      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-      SNOWFLAKE_WAREHOUSE: COMPUTE_WH
-      SNOWFLAKE_DATABASE: LEARNING_DB_DEV
-      SNOWFLAKE_ROLE: ACCOUNTADMIN
+      SNOWSQL_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWSQL_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWSQL_PWD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWSQL_WAREHOUSE: COMPUTE_WH
+      SNOWSQL_DATABASE: LEARNING_DB_DEV
+      SNOWSQL_ROLE: ACCOUNTADMIN
+      SNOWSQL_SCHEMA: HEALTH_DATA
 
     steps:
       - uses: actions/checkout@v4
@@ -30,9 +31,7 @@ jobs:
         run: |
           for f in migrations/*.sql; do
             echo "Running $f in DEV..."
-            ~/bin/snowsql -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER \
-              -d LEARNING_DB_DEV -s HEALTH_DATA -w COMPUTE_WH \
-              -f "$f" --option exit_on_error=true
+            ~/bin/snowsql -f "$f" --option exit_on_error=true
           done
 
       - name: Run Tests
@@ -40,9 +39,7 @@ jobs:
           FAILURES=0
           for f in tests/*.sql; do
             echo "Running test: $f"
-            RESULT=$(~/bin/snowsql -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER \
-              -d LEARNING_DB_DEV -s HEALTH_DATA -w COMPUTE_WH \
-              -f "$f" -o output_format=csv -o header=false)
+            RESULT=$(~/bin/snowsql -f "$f" -o output_format=csv -o header=false)
             if echo "$RESULT" | grep -q "FAIL"; then
               echo "FAILED: $f"
               FAILURES=$((FAILURES + 1))
@@ -57,9 +54,7 @@ jobs:
       - name: Cleanup DEV (reset for next run)
         if: always()
         run: |
-          ~/bin/snowsql -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER \
-            -d LEARNING_DB_DEV -s HEALTH_DATA -w COMPUTE_WH \
-            -q "DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS CASCADE;
-                DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS_DAILY_SUMMARY;
-                DROP STREAM IF EXISTS HEALTH_DATA.STREAM_PATIENT_EVENTS;
-                DROP TASK IF EXISTS HEALTH_DATA.TASK_PROCESS_EVENTS;"
+          ~/bin/snowsql -q "DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS CASCADE;
+              DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS_DAILY_SUMMARY;
+              DROP STREAM IF EXISTS HEALTH_DATA.STREAM_PATIENT_EVENTS;
+              DROP TASK IF EXISTS HEALTH_DATA.TASK_PROCESS_EVENTS;"
