@@ -13,7 +13,6 @@ jobs:
     env:
       SNOWSQL_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
       SNOWSQL_USER: ${{ secrets.SNOWFLAKE_USER }}
-      SNOWSQL_PWD: ${{ secrets.SNOWFLAKE_PASSWORD }}
       SNOWSQL_WAREHOUSE: COMPUTE_WH
       SNOWSQL_DATABASE: LEARNING_DB
       SNOWSQL_ROLE: ACCOUNTADMIN
@@ -27,24 +26,32 @@ jobs:
           curl -O https://sfc-repo.snowflakecomputing.com/snowsql/bootstrap/1.3/linux_x86_64/snowsql-1.3.1-linux_x86_64.bash
           SNOWSQL_DEST=~/bin SNOWSQL_LOGIN_SHELL=~/.profile bash snowsql-1.3.1-linux_x86_64.bash
 
+      - name: Setup Private Key
+        run: |
+          echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8
+          chmod 600 /tmp/rsa_key.p8
+
       - name: Deploy Migrations to PROD
         run: |
           for f in migrations/*.sql; do
             echo "Deploying $f to PROD..."
-            ~/bin/snowsql -f "$f" --option exit_on_error=true
+            ~/bin/snowsql --private-key-path /tmp/rsa_key.p8 -f "$f" --option exit_on_error=true
           done
 
       - name: Post-Deploy Validation
         run: |
-          echo "Running post-deploy tests against PROD..."
           for f in tests/*.sql; do
-            RESULT=$(~/bin/snowsql -f "$f" -o output_format=csv -o header=false)
+            RESULT=$(~/bin/snowsql --private-key-path /tmp/rsa_key.p8 -f "$f" -o output_format=csv -o header=false)
             if echo "$RESULT" | grep -q "FAIL"; then
               echo "POST-DEPLOY TEST FAILED: $f"
               exit 1
             fi
           done
-          echo "All post-deploy tests passed! Deployment successful."
+          echo "All post-deploy tests passed!"
+
+      - name: Cleanup Key
+        if: always()
+        run: rm -f /tmp/rsa_key.p8
 
       - name: Notify Success
         if: success()
