@@ -1,0 +1,65 @@
+name: CI - Test in DEV Database
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'migrations/**'
+      - 'stored_procedures/**'
+      - 'tasks/**'
+
+jobs:
+  test-in-dev:
+    runs-on: ubuntu-latest
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+      SNOWFLAKE_DATABASE: LEARNING_DB_DEV
+      SNOWFLAKE_ROLE: ACCOUNTADMIN
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SnowSQL
+        run: |
+          curl -O https://sfc-repo.snowflakecomputing.com/snowsql/bootstrap/1.3/linux_x86_64/snowsql-1.3.1-linux_x86_64.bash
+          SNOWSQL_DEST=~/bin SNOWSQL_LOGIN_SHELL=~/.profile bash snowsql-1.3.1-linux_x86_64.bash
+
+      - name: Run Migrations in DEV
+        run: |
+          for f in migrations/*.sql; do
+            echo "Running $f in DEV..."
+            ~/bin/snowsql -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER \
+              -d LEARNING_DB_DEV -s HEALTH_DATA -w COMPUTE_WH \
+              -f "$f" --option exit_on_error=true
+          done
+
+      - name: Run Tests
+        run: |
+          FAILURES=0
+          for f in tests/*.sql; do
+            echo "Running test: $f"
+            RESULT=$(~/bin/snowsql -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER \
+              -d LEARNING_DB_DEV -s HEALTH_DATA -w COMPUTE_WH \
+              -f "$f" -o output_format=csv -o header=false)
+            if echo "$RESULT" | grep -q "FAIL"; then
+              echo "FAILED: $f"
+              FAILURES=$((FAILURES + 1))
+            fi
+          done
+          if [ $FAILURES -gt 0 ]; then
+            echo "$FAILURES test(s) failed!"
+            exit 1
+          fi
+          echo "All tests passed!"
+
+      - name: Cleanup DEV (reset for next run)
+        if: always()
+        run: |
+          ~/bin/snowsql -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER \
+            -d LEARNING_DB_DEV -s HEALTH_DATA -w COMPUTE_WH \
+            -q "DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS CASCADE;
+                DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS_DAILY_SUMMARY;
+                DROP STREAM IF EXISTS HEALTH_DATA.STREAM_PATIENT_EVENTS;
+                DROP TASK IF EXISTS HEALTH_DATA.TASK_PROCESS_EVENTS;"
