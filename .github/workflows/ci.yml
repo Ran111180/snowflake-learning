@@ -1,0 +1,68 @@
+name: CI - Test in DEV Database
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'migrations/**'
+      - 'stored_procedures/**'
+      - 'tasks/**'
+
+jobs:
+  test-in-dev:
+    runs-on: ubuntu-latest
+    env:
+      SNOWSQL_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+      SNOWSQL_USER: ${{ secrets.SNOWFLAKE_USER }}
+      SNOWSQL_WAREHOUSE: COMPUTE_WH
+      SNOWSQL_DATABASE: LEARNING_DB_DEV
+      SNOWSQL_ROLE: ACCOUNTADMIN
+      SNOWSQL_SCHEMA: HEALTH_DATA
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SnowSQL
+        run: |
+          curl -O https://sfc-repo.snowflakecomputing.com/snowsql/bootstrap/1.3/linux_x86_64/snowsql-1.3.1-linux_x86_64.bash
+          SNOWSQL_DEST=~/bin SNOWSQL_LOGIN_SHELL=~/.profile bash snowsql-1.3.1-linux_x86_64.bash
+
+      - name: Setup Private Key
+        run: |
+          echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/rsa_key.p8
+          chmod 600 /tmp/rsa_key.p8
+
+      - name: Run Migrations in DEV
+        run: |
+          for f in migrations/*.sql; do
+            echo "Running $f in DEV..."
+            ~/bin/snowsql --private-key-path /tmp/rsa_key.p8 -f "$f" --option exit_on_error=true
+          done
+
+      - name: Run Tests
+        run: |
+          FAILURES=0
+          for f in tests/*.sql; do
+            echo "Running test: $f"
+            RESULT=$(~/bin/snowsql --private-key-path /tmp/rsa_key.p8 -f "$f" -o output_format=csv -o header=false)
+            if echo "$RESULT" | grep -q "FAIL"; then
+              echo "FAILED: $f"
+              FAILURES=$((FAILURES + 1))
+            fi
+          done
+          if [ $FAILURES -gt 0 ]; then
+            echo "$FAILURES test(s) failed!"
+            exit 1
+          fi
+          echo "All tests passed!"
+
+      - name: Cleanup DEV (reset for next run)
+        if: always()
+        run: |
+          ~/bin/snowsql --private-key-path /tmp/rsa_key.p8 -q "DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS CASCADE;
+              DROP TABLE IF EXISTS HEALTH_DATA.PATIENT_EVENTS_DAILY_SUMMARY;
+              DROP STREAM IF EXISTS HEALTH_DATA.STREAM_PATIENT_EVENTS;
+              DROP TASK IF EXISTS HEALTH_DATA.TASK_PROCESS_EVENTS;"
+
+      - name: Cleanup Key
+        if: always()
+        run: rm -f /tmp/rsa_key.p8
